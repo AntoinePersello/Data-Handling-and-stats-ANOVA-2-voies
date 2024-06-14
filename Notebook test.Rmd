@@ -1,0 +1,132 @@
+---
+title: |
+  ![](C:/Users/Antoine/OneDrive/Images/Images%20for%20R%20notebook/CHU-UN.png){width="266"}        ![](C:/Users/Antoine/OneDrive/Images/Images%20for%20R%20notebook/ITX_couleur.jpeg){width="103"} ![](C:/Users/Antoine/OneDrive/Images/Images%20for%20R%20notebook/IFB.png){width="212"}  
+  Data Analysis Report
+author: "A.P"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+Results of statistical analysis for effects of IFB treatments in the context of CPB\
+All results are displayed as follow:
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = TRUE)
+library(tidyverse)
+library(Rmisc)
+library(multcomp)
+library(boot)
+library(car)
+library(rstatix)
+library(ggpubr)
+library(emmeans)
+library(agricolae)
+library(DescTools)
+library(FSA)
+library(ggstatsplot)
+
+# Define paths
+path_wd <- "C:/Users/Antoine/OneDrive/Papierss/Traitements/Scripts"
+path_for_data_import <- "C:/Users/Antoine/OneDrive/Papierss/Traitements"
+data_file <- file.path(path_for_data_import, "Table for R analysis .csv")
+# Set working directory and read data
+setwd(path_wd)
+data_tab <- read.csv(data_file, header = TRUE, sep = ",")
+# Verify data structure
+str(data_tab)
+# Filter and transform data
+data_filter <- data_tab %>%
+  filter(Variable.type %in% c("BGC", "Vitals", "Bioch")) %>%
+  filter(Variable != "BUN/Crea") %>%
+  pivot_longer(cols = contains("_", ignore.case = TRUE))
+```
+
+```{r, results='hide'}
+print("Sneak peak of the df:")
+head(data_filter, 10)
+```
+
+Get a List of variables:
+
+```{r, include=FALSE}
+# Get unique variables
+var_list <- unique(data_filter$Variable)
+print(var_list)
+```
+
+Stat Analysis and post hoc test for each variable:
+
+```{r, indlude = FALSE, echo=FALSE}
+to_filter = "Mean"
+  data_final <- data_filter %>%
+    filter(Variable == to_filter) %>%
+    separate(name, into = c("Group", "number"), sep = "_")
+  
+  # Descriptive statistics
+  summary_data <- summarySE(data_final, measurevar = "value", groupvars = c("Timing", "Group"), na.rm = T) %>%
+    mutate(lower_ci = value - ci, upper_ci = value + ci)
+  
+  # Display descriptive statistics
+  cat("### Variable:", to_filter, "\n")
+  cat("#### Descriptive Statistics\n")
+  print(summary_data)
+  # Linear model
+    mod1 <- lm(value ~ Timing * Group, contrasts = list(Timing = contr.sum, Group = contr.sum), data = data_final)
+    anova_res <- Anova(mod1, type = 3)
+    
+    # ANOVA results
+    cat("#### ANOVA Results\n")
+    print(anova_res)
+    # Building linear model ---------------------------------------------------
+    cat("#### Data variances, Normality check\n")
+    cat("##### Residus independance\n")
+    
+    # Residuals Independence and Normality
+    cat("#### Residuals Independence and Normality\n")
+    plot(mod1, 1) # Independence of residuals
+    hist(mod1$residuals)
+    plot(mod1, 2) # Global Normality check
+    print(shapiro.test(residuals(mod1)))
+    print(ggqqplot(data_final, "value", ggtheme = theme_bw()) +
+            facet_grid(Timing ~ Group)) # Visualizing normality for each group/timing
+    
+    # Equal Variance Tests
+    cat("#### Equal Variance Tests\n")
+    residuals_mod1 <- residuals(mod1)
+    if (length(data_final$Group) == length(residuals(mod1))) {
+      print(bartlett.test(residuals_mod1 ~ data_final$Group)) # Equal variance test
+      print(leveneTest(residuals_mod1 ~ data_final$Group)) # Equal variance test
+      print(fligner.test(residuals_mod1 ~ data_final$Group)) # Equal variance test
+    }else{print("NA")}
+    plot(mod1, 3) # Homogeneity of variances
+    # Boxplots
+    cat("#### Boxplots\n")
+    print(ggplot(data_final, aes(x = Timing, y = value, colour = Group, fill = Group)) +
+            geom_boxplot(alpha = 0.5, position = position_dodge(width = 0.9)) +
+            stat_summary(fun = mean, geom = "errorbar", aes(ymax = ..y.., ymin = ..y..), width = 0.55, size = 1.0, linetype = "solid", position = position_dodge(width = 0.9)) +
+            ylab(to_filter) +
+            theme_classic())
+    
+    # Pairwise comparisons
+    timing_group <- emmeans(mod1, ~ Timing | Group)
+    t_g <- pairs(timing_group, adjust = "tukey")
+    group_timing <- emmeans(mod1, ~ Group | Timing)
+    g_t <- pairs(group_timing, adjust = "tukey")
+    var_number <- ifelse(length(unique(data_final$Timing)) > 3, "Perop", "PreECC")
+    timing_vs_perop <- contrast(timing_group, method = "trt.vs.ctrl", ref = var_number)
+    group_vs_cec <- contrast(group_timing, method = "trt.vs.ctrl", ref = "CEC")
+    
+    # Display pairwise comparison results
+    cat("#### Pairwise Comparison Results\n")
+    cat("##### Timing Group Comparison\n")
+    print(as.data.frame(t_g))
+    
+    cat("##### Group Timing Comparison\n")
+    print(as.data.frame(g_t))
+    
+    cat("##### Timing vs Perop\n")
+    print(as.data.frame(timing_vs_perop))
+    
+    cat("##### Group vs CEC\n")
+    print(as.data.frame(group_vs_cec))
+```
